@@ -1,0 +1,69 @@
+You are helping me bootstrap a full-stack project for a piano transcription app. This app allows users to upload a piano audio recording, transcribe it into MIDI using a pre-trained AI model, and visualize the transcription on a virtual piano keyboard.
+
+Set up a complete monorepo with the following:
+
+---
+
+🔹 **1. Project Structure**
+
+Create a root folder called `piano-transcriber` with this structure:
+
+- `backend/`: Python FastAPI server
+  - Handles audio upload and runs inference with a pre-trained transcription model (e.g., Onsets and Frames).
+  - Exposes REST endpoints to:
+    - Accept `.wav` audio file
+    - Run inference and return MIDI or JSON of detected notes
+    - Optionally return a downloadable `.mid` file
+
+- `frontend/`: React app (with Vite + Tailwind)
+  - Lets users upload `.wav` files
+  - Displays waveform preview (use Wavesurfer.js or similar)
+  - Visualizes MIDI output on a virtual piano (Canvas or SVG-based)
+  - Includes basic playback controls (play, pause, loop)
+
+- `shared/` (optional): for shared interfaces or utils, if needed
+
+---
+
+🔹 **2. Backend Requirements**
+
+- Use FastAPI
+- Install dependencies:
+  - `fastapi`, `uvicorn`, `pydantic`, `python-multipart`
+  - `librosa`, `pretty_midi`, `torch`, and optionally `onnxruntime` for model inference
+- Set up endpoints:
+  - `POST /upload` → accept `.wav`, save, preprocess with Librosa
+  - `POST /transcribe` → run inference on processed audio
+  - `GET /midi` → return generated MIDI file
+
+- Load a placeholder model (mock response for now if needed)
+
+---
+
+🔹 **3. Frontend Requirements**
+
+- Set up Vite + React + Tailwind
+- Build:
+  - Upload component for `.wav`
+  - Progress indicator
+  - Piano visualization that maps incoming MIDI data to key highlights (use piano-roll or custom SVG)
+  - Simple controls: Play/Pause, Tempo slider
+
+---
+
+🔹 **4. Dev & Build Tooling**
+
+- Setup `.env` for config
+- Add basic README with usage
+- Use `concurrently` or `make` to run frontend and backend together during dev
+- Optionally include Dockerfiles for both frontend and backend
+
+---
+
+🔹 **5. Extra Notes**
+
+- Add placeholder model logic now — actual inference will be integrated later
+- Add CORS support in FastAPI for frontend calls
+- Use Axios or Fetch in React for uploading files and requesting results
+
+The goal is a clean, modern, and scalable full-stack starter project that can support ML-powered inference, audio preprocessing, and piano visualization.
