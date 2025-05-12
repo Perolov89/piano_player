@@ -102,17 +102,12 @@ async def transcribe_audio(filename: str = Form(...)):
         result = process_audio(file_path)
         
         # TODO: Add actual transcription logic here
-        # For now, return mock MIDI data
-        mock_midi_data = {
-            "notes": [
-                {"note": 60, "start_time": 0.0, "end_time": 0.5, "velocity": 100},
-                {"note": 64, "start_time": 0.5, "end_time": 1.0, "velocity": 100},
-                {"note": 67, "start_time": 1.0, "end_time": 1.5, "velocity": 100},
-            ],
+
+        midi_data = {
             "mel_spectrogram": result["mel_spectrogram"],
             "duration": result["duration"]
         }
-        return JSONResponse(mock_midi_data)
+        return JSONResponse(midi_data)
     except HTTPException as he:
         raise he
     except Exception as e:

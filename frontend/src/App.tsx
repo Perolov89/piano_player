@@ -104,25 +104,29 @@ function App() {
     const imageData = ctx.createImageData(scaledWidth, data.length)
     const pixels = imageData.data
 
-    // Convert mel spectrogram to grayscale with scaling
+    // Convert mel spectrogram to viridis colormap
     for (let i = 0; i < data.length; i++) {
       for (let j = 0; j < scaledWidth; j++) {
         const value = data[i][Math.floor(j / scale)]
         const idx = (i * scaledWidth + j) * 4
         
-        // Grayscale colormap (black to white)
-        const intensity = Math.floor(value * 255)
-        pixels[idx] = intensity     // R
-        pixels[idx + 1] = intensity // G
-        pixels[idx + 2] = intensity // B
-        pixels[idx + 3] = 255       // A
+        // Viridis colormap
+        // Map value from [0,1] to viridis colors
+        const r = Math.floor(255 * (0.2627 + 0.0571 * value + 0.0000 * value * value))
+        const g = Math.floor(255 * (0.0000 + 0.9999 * value + 0.0000 * value * value))
+        const b = Math.floor(255 * (0.0000 + 0.0000 * value + 0.9999 * value * value))
+        
+        pixels[idx] = r       // R
+        pixels[idx + 1] = g   // G
+        pixels[idx + 2] = b   // B
+        pixels[idx + 3] = 255 // A
       }
     }
 
     // Draw the spectrogram
     ctx.putImageData(imageData, padding.left, padding.top)
 
-    // Draw color scale
+    // Draw color scale with viridis colormap
     const scaleWidth = 50
     const scaleHeight = data.length
     const gradient = ctx.createLinearGradient(
@@ -131,9 +135,14 @@ function App() {
       canvas.width - padding.right + 10 + scaleWidth,
       padding.top + scaleHeight
     )
-    gradient.addColorStop(0, '#000000')  // Black
-    gradient.addColorStop(0.5, '#808080')  // Gray
-    gradient.addColorStop(1, '#FFFFFF')  // White
+    
+    // Viridis colormap gradient stops
+    gradient.addColorStop(0, '#440154')    // Dark purple
+    gradient.addColorStop(0.2, '#3B528B')  // Dark blue
+    gradient.addColorStop(0.4, '#21918C')  // Teal
+    gradient.addColorStop(0.6, '#5EC962')  // Green
+    gradient.addColorStop(0.8, '#FDE725')  // Yellow
+    gradient.addColorStop(1, '#FFFFFF')    // White
     
     ctx.fillStyle = gradient
     ctx.fillRect(
@@ -217,7 +226,7 @@ function App() {
     try {
       // Upload the file
       const uploadResponse = await axios.post(`${API_URL}/upload`, formData)
-      const { mel_spectrogram, duration } = uploadResponse.data
+      const { mel_spectrogram } = uploadResponse.data
 
       // Update state with mel spectrogram data
       setMelSpectrogram(mel_spectrogram)
