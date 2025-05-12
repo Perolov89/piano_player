@@ -16,6 +16,15 @@ function App() {
   const [isUploading, setIsUploading] = useState(false)
   const [transcription, setTranscription] = useState<any>(null)
   const [melSpectrogram, setMelSpectrogram] = useState<number[][] | null>(null)
+  const [audioMetadata, setAudioMetadata] = useState<{
+    sample_rate: number;
+    duration: number;
+    shape: number[];
+    db_range: {
+      min: number;
+      max: number;
+    };
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -82,7 +91,7 @@ function App() {
 
   const drawMelSpectrogram = (data: number[][]) => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas || !audioMetadata) return
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
@@ -152,17 +161,18 @@ function App() {
       scaleHeight
     )
 
-    // Draw dB scale labels
+    // Draw dB scale labels using actual values from the backend
     ctx.fillStyle = 'black'
     ctx.font = '16px Arial'
     ctx.textAlign = 'left'
-    ctx.fillText('0 dB', canvas.width - padding.right + 65, padding.top)
-    ctx.fillText('-80 dB', canvas.width - padding.right + 65, padding.top + scaleHeight)
+    ctx.fillText(`${audioMetadata.db_range.max.toFixed(1)} dB`, canvas.width - padding.right + 65, padding.top)
+    ctx.fillText(`${audioMetadata.db_range.min.toFixed(1)} dB`, canvas.width - padding.right + 65, padding.top + scaleHeight)
 
     // Draw frequency scale (mel)
     ctx.textAlign = 'right'
+    const maxFreq = audioMetadata.sample_rate / 2  // Nyquist frequency
     ctx.fillText('0 Hz', padding.left - 5, padding.top + data.length)
-    ctx.fillText('8000 Hz', padding.left - 5, padding.top)
+    ctx.fillText(`${maxFreq} Hz`, padding.left - 5, padding.top)
 
     // Draw axis labels
     ctx.save()
@@ -226,10 +236,11 @@ function App() {
     try {
       // Upload the file
       const uploadResponse = await axios.post(`${API_URL}/upload`, formData)
-      const { mel_spectrogram } = uploadResponse.data
+      const { mel_spectrogram, sample_rate, duration, shape, db_range } = uploadResponse.data
 
-      // Update state with mel spectrogram data
+      // Update state with mel spectrogram data and metadata
       setMelSpectrogram(mel_spectrogram)
+      setAudioMetadata({ sample_rate, duration, shape, db_range })
 
       // Request transcription
       const transcribeResponse = await axios.post(

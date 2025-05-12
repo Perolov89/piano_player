@@ -9,6 +9,7 @@ import librosa
 import numpy as np
 from typing import List, Dict
 import soundfile as sf
+import pretty_midi
 
 app = FastAPI(title="Piano Transcriber API")
 
@@ -44,17 +45,52 @@ def process_audio(file_path: Path) -> Dict:
         # Convert to decibels
         mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
         
+        # Get min and max dB values before normalization
+        min_db = float(mel_spec_db.min())
+        max_db = float(mel_spec_db.max())
+        
         # Normalize to 0-1 range
         mel_spec_norm = (mel_spec_db - mel_spec_db.min()) / (mel_spec_db.max() - mel_spec_db.min())
         
         return {
             "mel_spectrogram": mel_spec_norm.tolist(),
+            "db_range": {
+                "min": min_db,
+                "max": max_db
+            },
             "sample_rate": sr,
             "duration": librosa.get_duration(y=y, sr=sr),
             "shape": mel_spec_norm.shape
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing audio: {str(e)}")
+
+def create_midi_file(notes: List[Dict], duration: float, output_path: Path) -> None:
+    """
+    Create a MIDI file from the transcribed notes
+    """
+    # Create a PrettyMIDI object
+    midi_data = pretty_midi.PrettyMIDI()
+    
+    # Create a piano program
+    piano_program = pretty_midi.Instrument(program=0)  # 0 is the program number for acoustic grand piano
+    
+    # Add each note to the piano program
+    for note_data in notes:
+        # Create a Note object
+        note = pretty_midi.Note(
+            velocity=note_data['velocity'],
+            pitch=note_data['note'],
+            start=note_data['start_time'],
+            end=note_data['end_time']
+        )
+        piano_program.notes.append(note)
+    
+    # Add the piano program to the PrettyMIDI object
+    midi_data.instruments.append(piano_program)
+    
+    # Write out the MIDI file
+    midi_data.write(str(output_path))
 
 @app.post("/upload")
 async def upload_audio(file: UploadFile = File(...)):
@@ -79,6 +115,7 @@ async def upload_audio(file: UploadFile = File(...)):
             "message": "File processed successfully",
             "filename": file.filename,
             "mel_spectrogram": result["mel_spectrogram"],
+            "db_range": result["db_range"],
             "sample_rate": result["sample_rate"],
             "duration": result["duration"],
             "shape": result["shape"]
@@ -102,8 +139,22 @@ async def transcribe_audio(filename: str = Form(...)):
         result = process_audio(file_path)
         
         # TODO: Add actual transcription logic here
+        # For now, create a mock transcription with a simple C major scale
+        mock_notes = []
+        for i in range(8):  # Create a C major scale
+            mock_notes.append({
+                "note": 60 + i,  # Start from middle C (60)
+                "start_time": i * 0.5,  # Each note starts 0.5 seconds after the previous
+                "end_time": (i + 1) * 0.5,  # Each note lasts 0.5 seconds
+                "velocity": 100  # Fixed velocity for now
+            })
+
+        # Create the MIDI file
+        midi_path = UPLOAD_DIR / f"{filename}.mid"
+        create_midi_file(mock_notes, result["duration"], midi_path)
 
         midi_data = {
+            "notes": mock_notes,
             "mel_spectrogram": result["mel_spectrogram"],
             "duration": result["duration"]
         }
@@ -119,8 +170,6 @@ async def get_midi_file(filename: str):
     Get the generated MIDI file
     """
     try:
-        # TODO: Add actual MIDI file generation logic here
-        # For now, return a mock MIDI file
         midi_path = UPLOAD_DIR / f"{filename}.mid"
         if not midi_path.exists():
             return JSONResponse(
