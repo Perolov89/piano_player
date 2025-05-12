@@ -5,21 +5,78 @@ import './App.css'
 
 const API_URL = 'http://localhost:8000'
 
+function formatTime(seconds: number): string {
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = Math.floor(seconds % 60)
+  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
+}
+
 function App() {
   const [file, setFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [transcription, setTranscription] = useState<any>(null)
   const [melSpectrogram, setMelSpectrogram] = useState<number[][] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
   const waveformRef = useRef<HTMLDivElement>(null)
   const wavesurferRef = useRef<WaveSurfer | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  // Initialize WaveSurfer
+  useEffect(() => {
+    if (waveformRef.current && !wavesurferRef.current) {
+      wavesurferRef.current = WaveSurfer.create({
+        container: waveformRef.current,
+        waveColor: '#4a9eff',
+        progressColor: '#1e40af',
+        height: 100,
+        cursorColor: '#1e40af',
+        barWidth: 2,
+        barGap: 1
+      })
+
+      // Add event listeners
+      wavesurferRef.current.on('play', () => setIsPlaying(true))
+      wavesurferRef.current.on('pause', () => setIsPlaying(false))
+      wavesurferRef.current.on('finish', () => setIsPlaying(false))
+      wavesurferRef.current.on('audioprocess', () => {
+        if (wavesurferRef.current) {
+          setCurrentTime(wavesurferRef.current.getCurrentTime())
+        }
+      })
+      wavesurferRef.current.on('ready', () => {
+        if (wavesurferRef.current) {
+          setDuration(wavesurferRef.current.getDuration())
+        }
+      })
+    }
+
+    // Cleanup
+    return () => {
+      if (wavesurferRef.current) {
+        wavesurferRef.current.destroy()
+        wavesurferRef.current = null
+      }
+    }
+  }, [])
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0]
     if (selectedFile) {
       setFile(selectedFile)
       setError(null)
+      // Load the new file into WaveSurfer
+      if (wavesurferRef.current) {
+        wavesurferRef.current.load(URL.createObjectURL(selectedFile))
+      }
+    }
+  }
+
+  const togglePlayPause = () => {
+    if (wavesurferRef.current) {
+      wavesurferRef.current.playPause()
     }
   }
 
@@ -30,29 +87,124 @@ function App() {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    // Set canvas size
-    canvas.width = data[0].length
-    canvas.height = data.length
+    // Set canvas size with extra space for labels
+    const padding = { top: 60, right: 120, bottom: 40, left: 120 }
+    const maxWidth = 1000 // Maximum width for the spectrogram
+    const scale = Math.min(1, maxWidth / data[0].length)
+    const scaledWidth = Math.floor(data[0].length * scale)
+    
+    canvas.width = scaledWidth + padding.left + padding.right
+    canvas.height = data.length + padding.top + padding.bottom
 
-    // Create image data
-    const imageData = ctx.createImageData(canvas.width, canvas.height)
+    // Clear canvas
+    ctx.fillStyle = 'white'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    // Create image data for spectrogram
+    const imageData = ctx.createImageData(scaledWidth, data.length)
     const pixels = imageData.data
 
-    // Convert mel spectrogram to grayscale image
+    // Convert mel spectrogram to grayscale with scaling
     for (let i = 0; i < data.length; i++) {
-      for (let j = 0; j < data[i].length; j++) {
-        const value = Math.floor(data[i][j] * 255)
-        const idx = (i * canvas.width + j) * 4
-        pixels[idx] = value     // R
-        pixels[idx + 1] = value // G
-        pixels[idx + 2] = value // B
-        pixels[idx + 3] = 255   // A
+      for (let j = 0; j < scaledWidth; j++) {
+        const value = data[i][Math.floor(j / scale)]
+        const idx = (i * scaledWidth + j) * 4
+        
+        // Grayscale colormap (black to white)
+        const intensity = Math.floor(value * 255)
+        pixels[idx] = intensity     // R
+        pixels[idx + 1] = intensity // G
+        pixels[idx + 2] = intensity // B
+        pixels[idx + 3] = 255       // A
       }
     }
 
-    // Draw the image
-    ctx.putImageData(imageData, 0, 0)
+    // Draw the spectrogram
+    ctx.putImageData(imageData, padding.left, padding.top)
+
+    // Draw color scale
+    const scaleWidth = 50
+    const scaleHeight = data.length
+    const gradient = ctx.createLinearGradient(
+      canvas.width - padding.right + 10,
+      padding.top,
+      canvas.width - padding.right + 10 + scaleWidth,
+      padding.top + scaleHeight
+    )
+    gradient.addColorStop(0, '#000000')  // Black
+    gradient.addColorStop(0.5, '#808080')  // Gray
+    gradient.addColorStop(1, '#FFFFFF')  // White
+    
+    ctx.fillStyle = gradient
+    ctx.fillRect(
+      canvas.width - padding.right + 10,
+      padding.top,
+      scaleWidth,
+      scaleHeight
+    )
+
+    // Draw dB scale labels
+    ctx.fillStyle = 'black'
+    ctx.font = '16px Arial'
+    ctx.textAlign = 'left'
+    ctx.fillText('0 dB', canvas.width - padding.right + 65, padding.top)
+    ctx.fillText('-80 dB', canvas.width - padding.right + 65, padding.top + scaleHeight)
+
+    // Draw frequency scale (mel)
+    ctx.textAlign = 'right'
+    ctx.fillText('0 Hz', padding.left - 5, padding.top + data.length)
+    ctx.fillText('8000 Hz', padding.left - 5, padding.top)
+
+    // Draw axis labels
+    ctx.save()
+    ctx.translate(padding.left - 80, canvas.height / 2)
+    ctx.rotate(-Math.PI / 2)
+    ctx.textAlign = 'center'
+    ctx.font = '18px Arial'
+    ctx.fillText('Frequency (Hz)', 0, 0)
+    ctx.restore()
+
+    // Draw time tracker
+    if (wavesurferRef.current) {
+      const currentTime = wavesurferRef.current.getCurrentTime()
+      const duration = wavesurferRef.current.getDuration()
+      const progress = currentTime / duration
+      const trackerX = padding.left + (scaledWidth * progress)
+      
+      // Draw vertical line
+      ctx.beginPath()
+      ctx.strokeStyle = '#FF0000'
+      ctx.lineWidth = 2
+      ctx.moveTo(trackerX, padding.top)
+      ctx.lineTo(trackerX, padding.top + data.length)
+      ctx.stroke()
+
+      // Draw time label
+      ctx.fillStyle = '#FF0000'
+      ctx.font = '14px Arial'
+      ctx.textAlign = 'center'
+      ctx.fillText(formatTime(currentTime), trackerX, padding.top + data.length + 20)
+    }
   }
+
+  // Add effect to update time tracker
+  useEffect(() => {
+    if (melSpectrogram && wavesurferRef.current) {
+      const updateTracker = () => {
+        drawMelSpectrogram(melSpectrogram)
+      }
+      
+      wavesurferRef.current.on('audioprocess', updateTracker)
+      wavesurferRef.current.on('interaction', updateTracker)
+      
+      return () => {
+        if (wavesurferRef.current) {
+          wavesurferRef.current.un('audioprocess', updateTracker)
+          wavesurferRef.current.un('interaction', updateTracker)
+        }
+      }
+    }
+  }, [melSpectrogram])
 
   const handleUpload = async () => {
     if (!file) return
@@ -144,8 +296,25 @@ function App() {
                   </div>
                 )}
 
-                {/* Waveform Display */}
-                <div ref={waveformRef} className="w-full h-32 bg-gray-100 rounded-lg mb-8" />
+                {/* Waveform Display with Playback Controls */}
+                {file && (
+                  <div className="mb-8">
+                    <div ref={waveformRef} className="w-full h-32 bg-gray-100 rounded-lg mb-2" />
+                    <div className="flex justify-between items-center">
+                      <div className="text-sm text-gray-600">
+                        {formatTime(currentTime)} / {formatTime(duration)}
+                      </div>
+                      <div className="flex space-x-4">
+                        <button
+                          onClick={togglePlayPause}
+                          className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+                        >
+                          {isPlaying ? 'Pause' : 'Play'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Mel Spectrogram Display */}
                 {melSpectrogram && (
@@ -154,7 +323,7 @@ function App() {
                     <div className="w-full overflow-x-auto">
                       <canvas
                         ref={canvasRef}
-                        className="w-full h-64 bg-gray-100 rounded-lg"
+                        className="w-full h-[48rem] bg-white rounded-lg"
                       />
                     </div>
                   </div>

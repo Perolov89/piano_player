@@ -6,6 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
+# data
+
+wav_c_scale
+
 # Distribution / packaging
 .Python
 build/
