@@ -10,6 +10,11 @@ import numpy as np
 from typing import List, Dict
 import soundfile as sf
 import pretty_midi
+import torch
+from piano_transcription_inference import PianoTranscription, sample_rate
+import requests
+import shutil
+import logging
 
 app = FastAPI(title="Piano Transcriber API")
 
@@ -26,6 +31,21 @@ app.add_middleware(
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
+# Set global flag to use piano_transcription_inference
+USE_PIANO_TRANSCRIPTION = True
+TRANSCRIPTOR = None
+MODEL_SAMPLE_RATE = 16000  # Default sample rate
+
+# Initialize the piano transcription model
+try:
+    print("Initializing piano transcription model...")
+    TRANSCRIPTOR = PianoTranscription(device='cuda' if torch.cuda.is_available() else 'cpu')
+    print("Piano transcription model initialized successfully")
+except Exception as e:
+    print(f"Error initializing piano transcription model: {str(e)}")
+    print("Falling back to librosa for transcription")
+    USE_PIANO_TRANSCRIPTION = False
+
 def process_audio(file_path: Path) -> Dict:
     """
     Process audio file and convert to mel spectrogram
@@ -39,7 +59,7 @@ def process_audio(file_path: Path) -> Dict:
             y=y,
             sr=sr,
             n_mels=128,
-            fmax=8000
+            fmax=8000 # 8000 Hz is the maximum frequency for a piano
         )
         
         # Convert to decibels
@@ -64,33 +84,6 @@ def process_audio(file_path: Path) -> Dict:
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing audio: {str(e)}")
-
-def create_midi_file(notes: List[Dict], duration: float, output_path: Path) -> None:
-    """
-    Create a MIDI file from the transcribed notes
-    """
-    # Create a PrettyMIDI object
-    midi_data = pretty_midi.PrettyMIDI()
-    
-    # Create a piano program
-    piano_program = pretty_midi.Instrument(program=0)  # 0 is the program number for acoustic grand piano
-    
-    # Add each note to the piano program
-    for note_data in notes:
-        # Create a Note object
-        note = pretty_midi.Note(
-            velocity=note_data['velocity'],
-            pitch=note_data['note'],
-            start=note_data['start_time'],
-            end=note_data['end_time']
-        )
-        piano_program.notes.append(note)
-    
-    # Add the piano program to the PrettyMIDI object
-    midi_data.instruments.append(piano_program)
-    
-    # Write out the MIDI file
-    midi_data.write(str(output_path))
 
 @app.post("/upload")
 async def upload_audio(file: UploadFile = File(...)):
@@ -128,60 +121,181 @@ async def upload_audio(file: UploadFile = File(...)):
 @app.post("/transcribe")
 async def transcribe_audio(filename: str = Form(...)):
     """
-    Transcribe the uploaded audio file to MIDI
+    Transcribe the uploaded audio file and return notes data
     """
     try:
         file_path = UPLOAD_DIR / filename
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="File not found")
-            
-        # Process audio and get mel spectrogram
-        result = process_audio(file_path)
         
-        # TODO: Add actual transcription logic here
-        # For now, create a mock transcription with a simple C major scale
-        mock_notes = []
-        for i in range(8):  # Create a C major scale
-            mock_notes.append({
-                "note": 60 + i,  # Start from middle C (60)
-                "start_time": i * 0.5,  # Each note starts 0.5 seconds after the previous
-                "end_time": (i + 1) * 0.5,  # Each note lasts 0.5 seconds
-                "velocity": 100  # Fixed velocity for now
-            })
-
-        # Create the MIDI file
-        midi_path = UPLOAD_DIR / f"{filename}.mid"
-        create_midi_file(mock_notes, result["duration"], midi_path)
-
-        midi_data = {
-            "notes": mock_notes,
-            "mel_spectrogram": result["mel_spectrogram"],
-            "duration": result["duration"]
-        }
-        return JSONResponse(midi_data)
+        if USE_PIANO_TRANSCRIPTION and TRANSCRIPTOR:
+            # Use Piano Transcription model
+            # Load audio file specifically for the model (resampling to MODEL_SAMPLE_RATE)
+            y, sr = librosa.load(file_path, sr=MODEL_SAMPLE_RATE)
+            
+            # Create a temp directory for the MIDI file
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_midi_path = os.path.join(temp_dir, "output.mid")
+                
+                # Transcribe audio using the model
+                transcribed_dict = TRANSCRIPTOR.transcribe(y, temp_midi_path)
+                
+                # Load the saved MIDI file
+                midi_data = pretty_midi.PrettyMIDI(temp_midi_path)
+                
+                # Convert MIDI to our notes format
+                notes = []
+                for instrument in midi_data.instruments:
+                    for note in instrument.notes:
+                        notes.append({
+                            "note": int(note.pitch),
+                            "start_time": float(note.start),
+                            "end_time": float(note.end),
+                            "velocity": int(note.velocity)
+                        })
+                
+                # Sort notes by start time
+                notes.sort(key=lambda x: x["start_time"])
+                
+                # Get audio duration
+                duration = librosa.get_duration(y=y, sr=sr)
+        else:
+            # Fall back to librosa for transcription
+            print("Using librosa fallback for transcription")
+            y, sr = librosa.load(file_path, sr=None)
+            
+            # Process audio to get mel spectrogram
+            result = process_audio(file_path)
+            
+            # Get onset frames
+            onset_frames = librosa.onset.onset_detect(y=y, sr=sr, units='frames')
+            onset_times = librosa.frames_to_time(onset_frames, sr=sr)
+            
+            # Get pitch using harmonic-percussive separation and chroma
+            y_harmonic = librosa.effects.harmonic(y)
+            pitches, magnitudes = librosa.piptrack(y=y_harmonic, sr=sr, threshold=0.1)
+            
+            notes = []
+            for i, onset_time in enumerate(onset_times):
+                # Get pitch at onset time
+                onset_frame = onset_frames[i]
+                pitch_slice = pitches[:, onset_frame]
+                magnitude_slice = magnitudes[:, onset_frame]
+                
+                # Find the pitch with highest magnitude
+                if magnitude_slice.max() > 0:
+                    best_pitch_idx = magnitude_slice.argmax()
+                    frequency = pitch_slice[best_pitch_idx]
+                    
+                    if frequency > 0:
+                        # Convert frequency to MIDI note
+                        midi_note = librosa.hz_to_midi(frequency)
+                        
+                        # Estimate note duration (use next onset or remaining audio)
+                        end_time = onset_times[i + 1] if i + 1 < len(onset_times) else result["duration"]
+                        
+                        notes.append({
+                            "note": int(round(midi_note)),
+                            "start_time": float(onset_time),
+                            "end_time": float(end_time),
+                            "velocity": int(magnitude_slice.max() * 127)
+                        })
+            
+            duration = result["duration"]
+        
+        return JSONResponse({
+            "notes": notes,
+            "duration": duration,
+            "model_used": "Piano Transcription" if USE_PIANO_TRANSCRIPTION and TRANSCRIPTOR else "Librosa (fallback)"
+        })
     except HTTPException as he:
         raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error transcribing audio: {str(e)}")
 
-@app.get("/midi/{filename}")
-async def get_midi_file(filename: str):
+@app.post("/generate-midi")
+async def generate_midi(filename: str = Form(...)):
     """
-    Get the generated MIDI file
+    Transcribe audio and return a MIDI file
     """
     try:
-        midi_path = UPLOAD_DIR / f"{filename}.mid"
-        if not midi_path.exists():
-            return JSONResponse(
-                status_code=404,
-                content={"message": "MIDI file not found"}
+        file_path = UPLOAD_DIR / filename
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        with tempfile.NamedTemporaryFile(suffix=".mid", delete=False) as temp_midi:
+            midi_path = temp_midi.name
+            
+            if USE_PIANO_TRANSCRIPTION and TRANSCRIPTOR:
+                # Use Piano Transcription model
+                # Load audio file specifically for the model (resampling to MODEL_SAMPLE_RATE)
+                y, sr = librosa.load(file_path, sr=MODEL_SAMPLE_RATE)
+                
+                # Transcribe audio using the model
+                TRANSCRIPTOR.transcribe(y, midi_path)
+            else:
+                # Fall back to librosa for transcription
+                y, sr = librosa.load(file_path, sr=None)
+                
+                # Create a new MIDI file
+                midi = pretty_midi.PrettyMIDI()
+                piano_program = pretty_midi.instrument_name_to_program('Acoustic Grand Piano')
+                piano = pretty_midi.Instrument(program=piano_program)
+                
+                # Get onset frames
+                onset_frames = librosa.onset.onset_detect(y=y, sr=sr, units='frames')
+                onset_times = librosa.frames_to_time(onset_frames, sr=sr)
+                
+                # Get pitch using harmonic-percussive separation and chroma
+                y_harmonic = librosa.effects.harmonic(y)
+                pitches, magnitudes = librosa.piptrack(y=y_harmonic, sr=sr, threshold=0.1)
+                
+                for i, onset_time in enumerate(onset_times):
+                    # Get pitch at onset time
+                    onset_frame = onset_frames[i]
+                    pitch_slice = pitches[:, onset_frame]
+                    magnitude_slice = magnitudes[:, onset_frame]
+                    
+                    # Find the pitch with highest magnitude
+                    if magnitude_slice.max() > 0:
+                        best_pitch_idx = magnitude_slice.argmax()
+                        frequency = pitch_slice[best_pitch_idx]
+                        
+                        if frequency > 0:
+                            # Convert frequency to MIDI note
+                            midi_note = librosa.hz_to_midi(frequency)
+                            
+                            # Estimate note duration (use next onset or remaining audio)
+                            end_time = onset_times[i + 1] if i + 1 < len(onset_times) else librosa.get_duration(y=y, sr=sr)
+                            velocity = int(magnitude_slice.max() * 127)
+                            
+                            # Create a Note object
+                            note = pretty_midi.Note(
+                                velocity=velocity,
+                                pitch=int(round(midi_note)),
+                                start=onset_time,
+                                end=end_time
+                            )
+                            
+                            # Add note to the instrument
+                            piano.notes.append(note)
+                
+                # Add the instrument to the PrettyMIDI object
+                midi.instruments.append(piano)
+                
+                # Write out the MIDI data
+                midi.write(midi_path)
+            
+            # Return the MIDI file
+            return FileResponse(
+                path=midi_path,
+                filename=f"{Path(filename).stem}.mid",
+                media_type="audio/midi"
             )
-        return FileResponse(midi_path)
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"message": f"Error retrieving MIDI file: {str(e)}"}
-        )
+        raise HTTPException(status_code=500, detail=f"Error generating MIDI: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
