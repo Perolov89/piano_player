@@ -11,15 +11,16 @@ function formatTime(seconds: number): string {
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
 }
 
-// Add this new component for piano roll visualization
-const PianoRoll = ({ notes, duration }: { notes: any[], duration: number }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const PIXELS_PER_SECOND = 50; // Reduced from 100 to 50
-  const KEY_WIDTH = 10; // Reduced from 20 to 10
-  const TOTAL_KEYS = 88; // Standard piano keys (A0 to C8)
+// Piano roll visualization
+const PianoRoll = ({ notes, duration, currentTime }: { notes: any[], duration: number, currentTime: number }) => {
+  const pianoRollRef = useRef<HTMLCanvasElement>(null);
+  const PIXELS_PER_SECOND = 50;
+  const KEY_WIDTH = 10; 
+  const TOTAL_KEYS = 88;
 
+  // Effect for drawing piano roll and tracker
   useEffect(() => {
-    const canvas = canvasRef.current;
+    const canvas = pianoRollRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
@@ -86,9 +87,18 @@ const PianoRoll = ({ notes, duration }: { notes: any[], duration: number }) => {
       ctx.fillText(noteName, 2, x + KEY_WIDTH - 2);
     }
 
+    // Draw time tracker
+    const trackerY = currentTime * PIXELS_PER_SECOND;
+    ctx.beginPath();
+    ctx.strokeStyle = '#FF0000';
+    ctx.lineWidth = 2;
+    ctx.moveTo(trackerY, 0);
+    ctx.lineTo(trackerY, width);
+    ctx.stroke();
+
     // Restore the context state
     ctx.restore();
-  }, [notes, duration]);
+  }, [notes, duration, currentTime]);
 
   // Helper function to convert MIDI note number to note name
   const getNoteName = (midiNote: number): string => {
@@ -101,7 +111,7 @@ const PianoRoll = ({ notes, duration }: { notes: any[], duration: number }) => {
   return (
     <div className="w-full overflow-x-auto">
       <canvas
-        ref={canvasRef}
+        ref={pianoRollRef}
         className="w-full bg-white rounded-lg"
         style={{ minWidth: '100%' }}
       />
@@ -130,44 +140,6 @@ function App() {
   const waveformRef = useRef<HTMLDivElement>(null)
   const wavesurferRef = useRef<WaveSurfer | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  // Initialize WaveSurfer
-  useEffect(() => {
-    if (waveformRef.current && !wavesurferRef.current) {
-      wavesurferRef.current = WaveSurfer.create({
-        container: waveformRef.current,
-        waveColor: '#4a9eff',
-        progressColor: '#1e40af',
-        height: 100,
-        cursorColor: '#1e40af',
-        barWidth: 2,
-        barGap: 1
-      })
-
-      // Add event listeners
-      wavesurferRef.current.on('play', () => setIsPlaying(true))
-      wavesurferRef.current.on('pause', () => setIsPlaying(false))
-      wavesurferRef.current.on('finish', () => setIsPlaying(false))
-      wavesurferRef.current.on('audioprocess', () => {
-        if (wavesurferRef.current) {
-          setCurrentTime(wavesurferRef.current.getCurrentTime())
-        }
-      })
-      wavesurferRef.current.on('ready', () => {
-        if (wavesurferRef.current) {
-          setDuration(wavesurferRef.current.getDuration())
-        }
-      })
-    }
-
-    // Cleanup
-    return () => {
-      if (wavesurferRef.current) {
-        wavesurferRef.current.destroy()
-        wavesurferRef.current = null
-      }
-    }
-  }, [])
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0]
@@ -358,9 +330,54 @@ function App() {
           container: waveformRef.current,
           waveColor: '#4a9eff',
           progressColor: '#1e40af',
-          height: 100
+          height: 100,
+          cursorColor: '#1e40af',
+          barWidth: 2,
+          barGap: 1
         })
-        wavesurferRef.current.load(URL.createObjectURL(file))
+
+        // Add event listeners
+        wavesurferRef.current.on('play', () => {
+          console.log('Play event');
+          setIsPlaying(true);
+        });
+        
+        wavesurferRef.current.on('pause', () => {
+          console.log('Pause event');
+          setIsPlaying(false);
+        });
+        
+        wavesurferRef.current.on('finish', () => {
+          console.log('Finish event');
+          setIsPlaying(false);
+        });
+        
+        wavesurferRef.current.on('audioprocess', () => {
+          if (wavesurferRef.current) {
+            const time = wavesurferRef.current.getCurrentTime();
+            console.log('Audio process - current time:', time);
+            setCurrentTime(time);
+          }
+        });
+        
+        wavesurferRef.current.on('ready', () => {
+          if (wavesurferRef.current) {
+            const dur = wavesurferRef.current.getDuration();
+            console.log('Ready event - duration:', dur);
+            setDuration(dur);
+          }
+        });
+        
+        wavesurferRef.current.on('interaction', () => {
+          if (wavesurferRef.current) {
+            const time = wavesurferRef.current.getCurrentTime();
+            console.log('Interaction - current time:', time);
+            setCurrentTime(time);
+          }
+        });
+
+        // Load the audio file
+        wavesurferRef.current.load(URL.createObjectURL(file));
       }
     } catch (error: any) {
       setError(error.response?.data?.detail || 'An error occurred during upload')
@@ -369,6 +386,16 @@ function App() {
       setIsUploading(false)
     }
   }
+
+  // Remove the old WaveSurfer initialization effect since we're now doing it in handleUpload
+  useEffect(() => {
+    return () => {
+      if (wavesurferRef.current) {
+        wavesurferRef.current.destroy();
+        wavesurferRef.current = null;
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (melSpectrogram) {
@@ -453,7 +480,8 @@ function App() {
                     <h2 className="text-xl font-semibold mb-4">Piano Roll</h2>
                     <PianoRoll 
                       notes={transcription.notes} 
-                      duration={transcription.duration} 
+                      duration={transcription.duration}
+                      currentTime={currentTime}
                     />
                   </div>
                 )}
