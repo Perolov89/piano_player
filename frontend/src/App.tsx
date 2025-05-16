@@ -11,6 +11,104 @@ function formatTime(seconds: number): string {
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
 }
 
+// Add this new component for piano roll visualization
+const PianoRoll = ({ notes, duration }: { notes: any[], duration: number }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const PIXELS_PER_SECOND = 50; // Reduced from 100 to 50
+  const KEY_WIDTH = 10; // Reduced from 20 to 10
+  const TOTAL_KEYS = 88; // Standard piano keys (A0 to C8)
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Set canvas size - swap width and height for rotation
+    const width = TOTAL_KEYS * KEY_WIDTH;
+    const height = duration * PIXELS_PER_SECOND;
+    canvas.width = width;
+    canvas.height = height;
+
+    // Clear canvas
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, width, height);
+
+    // Save the context state
+    ctx.save();
+    
+    // Rotate the canvas 90 degrees clockwise
+    ctx.translate(width, 0);
+    ctx.rotate(Math.PI / 2);
+
+    // Draw piano keys background
+    for (let i = 0; i < TOTAL_KEYS; i++) {
+      const x = i * KEY_WIDTH;
+      ctx.fillStyle = i % 12 === 1 || i % 12 === 3 || i % 12 === 6 || i % 12 === 8 || i % 12 === 10 ? '#333' : '#fff';
+      ctx.fillRect(0, x, height, KEY_WIDTH);
+      ctx.strokeStyle = '#ccc';
+      ctx.strokeRect(0, x, height, KEY_WIDTH);
+    }
+
+    // Draw notes
+    notes.forEach(note => {
+      const y = note.start_time * PIXELS_PER_SECOND;
+      const x = (note.note - 21) * KEY_WIDTH; // A0 is MIDI note 21
+      const noteHeight = (note.end_time - note.start_time) * PIXELS_PER_SECOND;
+      
+      // Draw note rectangle
+      ctx.fillStyle = `rgba(0, 100, 255, ${note.velocity / 127})`;
+      ctx.fillRect(y, x, noteHeight, KEY_WIDTH);
+      ctx.strokeStyle = 'rgba(0, 50, 255, 0.5)';
+      ctx.strokeRect(y, x, noteHeight, KEY_WIDTH);
+    });
+
+    // Draw time markers
+    ctx.fillStyle = '#666';
+    ctx.font = '8px Arial'; // Reduced font size
+    for (let t = 0; t <= duration; t += 1) {
+      const y = t * PIXELS_PER_SECOND;
+      ctx.beginPath();
+      ctx.moveTo(y, 0);
+      ctx.lineTo(y, width);
+      ctx.strokeStyle = '#ccc';
+      ctx.stroke();
+      ctx.fillText(`${t}s`, y + 2, 8); // Adjusted y position for smaller font
+    }
+
+    // Draw note labels
+    ctx.fillStyle = '#000';
+    ctx.font = '8px Arial'; // Reduced font size
+    for (let i = 0; i < TOTAL_KEYS; i++) {
+      const x = i * KEY_WIDTH;
+      const noteName = getNoteName(i + 21); // Convert MIDI note number to note name
+      ctx.fillText(noteName, 2, x + KEY_WIDTH - 2);
+    }
+
+    // Restore the context state
+    ctx.restore();
+  }, [notes, duration]);
+
+  // Helper function to convert MIDI note number to note name
+  const getNoteName = (midiNote: number): string => {
+    const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const octave = Math.floor(midiNote / 12) - 1;
+    const noteIndex = midiNote % 12;
+    return `${noteNames[noteIndex]}${octave}`;
+  };
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <canvas
+        ref={canvasRef}
+        className="w-full bg-white rounded-lg"
+        style={{ minWidth: '100%' }}
+      />
+    </div>
+  );
+};
+
 function App() {
   const [file, setFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
@@ -346,6 +444,17 @@ function App() {
                         className="w-full h-[48rem] bg-white rounded-lg"
                       />
                     </div>
+                  </div>
+                )}
+
+                {/* Piano Roll Visualization */}
+                {transcription && (
+                  <div className="mb-8">
+                    <h2 className="text-xl font-semibold mb-4">Piano Roll</h2>
+                    <PianoRoll 
+                      notes={transcription.notes} 
+                      duration={transcription.duration} 
+                    />
                   </div>
                 )}
 

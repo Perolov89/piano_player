@@ -5,7 +5,7 @@ A full-stack application that transcribes piano audio recordings into MIDI using
 ## Features
 
 - 🎹 Upload piano audio recordings (.wav format)
-- 🎵 AI-powered transcription to MIDI
+- 🎵 AI-powered transcription to MIDI using piano_transcription_inference
 - 🎼 Interactive piano roll visualization
 - 🔊 Audio playback with waveform display
 - ⚡ Real-time processing and feedback
@@ -47,8 +47,17 @@ piano-transcriber/
 
 4. Start the server:
    ```bash
-   uvicorn main:app --reload
+   uvicorn app.main:app --reload
    ```
+
+### Transcription Technology
+
+This application uses **piano_transcription_inference** for audio-to-MIDI transcription. The model provides:
+
+- Accurate note detection
+- Support for polyphonic piano transcription
+- Good results with piano recordings
+- Compatible with standard Python 3.8+ environments
 
 ### Frontend Setup
 
@@ -80,3 +89,7 @@ MIT
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Credits
+
+- [piano_transcription_inference](https://github.com/qiuqiangkong/piano_transcription_inference) - A piano transcription model for audio to MIDI conversion
