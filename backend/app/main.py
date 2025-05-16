@@ -27,9 +27,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create uploads directory if it doesn't exist
-UPLOAD_DIR = Path("uploads")
+# Set up project directories
+PROJECT_DIR = Path(__file__).parent.parent.parent
+UPLOAD_DIR = PROJECT_DIR / "uploads"
+MODELS_DIR = PROJECT_DIR / "models"
+
+# Create directories if they don't exist
 UPLOAD_DIR.mkdir(exist_ok=True)
+MODELS_DIR.mkdir(exist_ok=True)
+
+# Model file path (relative to PROJECT_DIR)
+MODEL_FILENAME = "CRNN_note_F1=0.9677_pedal_F1=0.9186.pth"
+MODEL_PATH = MODELS_DIR / MODEL_FILENAME
 
 # Set global flag to use piano_transcription_inference
 USE_PIANO_TRANSCRIPTION = True
@@ -39,10 +48,16 @@ MODEL_SAMPLE_RATE = 16000  # Default sample rate
 # Initialize the piano transcription model
 try:
     print("Initializing piano transcription model...")
-    TRANSCRIPTOR = PianoTranscription(device='cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Looking for model file at: {MODEL_PATH}")
+    # Set checkpoint_path to the model file in our project
+    TRANSCRIPTOR = PianoTranscription(
+        device='cuda' if torch.cuda.is_available() else 'cpu',
+        checkpoint_path=str(MODEL_PATH) if MODEL_PATH.exists() else None
+    )
     print("Piano transcription model initialized successfully")
 except Exception as e:
     print(f"Error initializing piano transcription model: {str(e)}")
+    print(f"Please download the model file and place it at: {MODEL_PATH}")
     print("Falling back to librosa for transcription")
     USE_PIANO_TRANSCRIPTION = False
 
