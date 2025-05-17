@@ -88,14 +88,14 @@ def process_audio(file_path: Path) -> Dict:
         mel_spec_norm = (mel_spec_db - mel_spec_db.min()) / (mel_spec_db.max() - mel_spec_db.min())
         
         return {
-            "mel_spectrogram": mel_spec_norm.tolist(),
+            "mel_spectrogram": mel_spec_db.tolist(),
             "db_range": {
                 "min": min_db,
                 "max": max_db
             },
             "sample_rate": sr,
             "duration": librosa.get_duration(y=y, sr=sr),
-            "shape": mel_spec_norm.shape
+            "shape": mel_spec_db.shape
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing audio: {str(e)}")

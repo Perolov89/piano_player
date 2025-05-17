@@ -159,6 +159,30 @@ function App() {
     }
   }
 
+  // Helper: interpolate between two colors
+  function interpolateColor(color1: number[], color2: number[], t: number): number[] {
+    return color1.map((c, i) => Math.round(c + (color2[i] - c) * t));
+  }
+
+  // Helper: get plasma-like color for a value in [0, 1]
+  function plasmaColor(norm: number): [number, number, number] {
+    // Color stops: black, dark blue, magenta, orange, white
+    const stops: [number, number, number][] = [
+      [0, 0, 0],         // Black
+      [13, 8, 135],      // Dark Blue (#0d0887)
+      [204, 70, 120],    // Magenta (#cc4678)
+      [252, 166, 54],    // Orange (#fca636)
+      [255, 255, 255],   // White
+    ];
+    const n = stops.length - 1;
+    const scaled = norm * n;
+    const idx = Math.floor(scaled);
+    const t = scaled - idx;
+    if (idx >= n) return [stops[n][0], stops[n][1], stops[n][2]];
+    const interp = interpolateColor(stops[idx], stops[idx + 1], t);
+    return [interp[0], interp[1], interp[2]];
+  }
+
   const drawMelSpectrogram = (data: number[][]) => {
     const canvas = canvasRef.current
     if (!canvas || !audioMetadata) return
@@ -183,66 +207,63 @@ function App() {
     const imageData = ctx.createImageData(scaledWidth, data.length)
     const pixels = imageData.data
 
-    // Convert mel spectrogram to viridis colormap
+    // dB normalization (handle negative dB correctly)
+    let minDb = audioMetadata.db_range.min
+    let maxDb = audioMetadata.db_range.max
+    // If minDb > maxDb, swap (should be -80 to 0, not 0 to -80)
+    if (minDb > maxDb) {
+      [minDb, maxDb] = [maxDb, minDb]
+    }
+    const dbRange = maxDb - minDb
+
     for (let i = 0; i < data.length; i++) {
       for (let j = 0; j < scaledWidth; j++) {
         const value = data[i][Math.floor(j / scale)]
         const idx = (i * scaledWidth + j) * 4
-        
-        // Viridis colormap
-        // Map value from [0,1] to viridis colors
-        const r = Math.floor(255 * (0.2627 + 0.0571 * value + 0.0000 * value * value))
-        const g = Math.floor(255 * (0.0000 + 0.9999 * value + 0.0000 * value * value))
-        const b = Math.floor(255 * (0.0000 + 0.0000 * value + 0.9999 * value * value))
-        
-        pixels[idx] = r       // R
-        pixels[idx + 1] = g   // G
-        pixels[idx + 2] = b   // B
-        pixels[idx + 3] = 255 // A
+        // Normalize value to [0, 1] (0 dB = 1, -80 dB = 0)
+        let norm = (value - minDb) / dbRange
+        norm = Math.max(0, Math.min(1, norm))
+        const [r, g, b] = plasmaColor(norm)
+        pixels[idx] = r
+        pixels[idx + 1] = g
+        pixels[idx + 2] = b
+        pixels[idx + 3] = 255
       }
     }
 
     // Draw the spectrogram
     ctx.putImageData(imageData, padding.left, padding.top)
 
-    // Draw color scale with viridis colormap
+    // Draw color scale (vertical bar)
     const scaleWidth = 50
     const scaleHeight = data.length
-    const gradient = ctx.createLinearGradient(
-      canvas.width - padding.right + 10,
-      padding.top,
-      canvas.width - padding.right + 10 + scaleWidth,
-      padding.top + scaleHeight
-    )
-    
-    // Viridis colormap gradient stops
-    gradient.addColorStop(0, '#440154')    // Dark purple
-    gradient.addColorStop(0.2, '#3B528B')  // Dark blue
-    gradient.addColorStop(0.4, '#21918C')  // Teal
-    gradient.addColorStop(0.6, '#5EC962')  // Green
-    gradient.addColorStop(0.8, '#FDE725')  // Yellow
-    gradient.addColorStop(1, '#FFFFFF')    // White
-    
-    ctx.fillStyle = gradient
-    ctx.fillRect(
-      canvas.width - padding.right + 10,
-      padding.top,
-      scaleWidth,
-      scaleHeight
-    )
+    for (let y = 0; y < scaleHeight; y++) {
+      const norm = y / (scaleHeight - 1) // 0 at top (0 dB), 1 at bottom (-80 dB)
+      const [r, g, b] = plasmaColor(1 - norm)
+      ctx.fillStyle = `rgb(${r},${g},${b})`
+      ctx.fillRect(canvas.width - padding.right + 10, padding.top + y, scaleWidth, 1)
+    }
 
-    // Draw dB scale labels using actual values from the backend
+    // Draw dB scale labels (0 dB at top, -80 dB at bottom)
     ctx.fillStyle = 'black'
     ctx.font = '16px Arial'
     ctx.textAlign = 'left'
-    ctx.fillText(`${audioMetadata.db_range.max.toFixed(1)} dB`, canvas.width - padding.right + 65, padding.top)
-    ctx.fillText(`${audioMetadata.db_range.min.toFixed(1)} dB`, canvas.width - padding.right + 65, padding.top + scaleHeight)
+    ctx.fillText(`${maxDb.toFixed(1)} dB`, canvas.width - padding.right + 65, padding.top)
+    ctx.fillText(`${minDb.toFixed(1)} dB`, canvas.width - padding.right + 65, padding.top + scaleHeight)
 
-    // Draw frequency scale (mel)
+    // Draw frequency scale (mel, linear, with more ticks)
     ctx.textAlign = 'right'
-    const maxFreq = audioMetadata.sample_rate / 2  // Nyquist frequency
-    ctx.fillText('0 Hz', padding.left - 5, padding.top + data.length)
-    ctx.fillText(`${maxFreq} Hz`, padding.left - 5, padding.top)
+    const maxFreq = 8000; // Match backend fmax
+    const freqTicks = [0, 100, 300, 1000, 3000, 6000, 10000, Math.round(maxFreq)]
+    freqTicks.forEach(f => {
+      const y = padding.top + data.length - (f / maxFreq) * data.length
+      ctx.fillText(`${f}`, padding.left - 5, y)
+      ctx.beginPath()
+      ctx.strokeStyle = '#eee'
+      ctx.moveTo(padding.left, y)
+      ctx.lineTo(padding.left + scaledWidth, y)
+      ctx.stroke()
+    })
 
     // Draw axis labels
     ctx.save()
@@ -440,10 +461,11 @@ function App() {
                     {error}
                   </div>
                 )}
-
+                
                 {/* Waveform Display with Playback Controls */}
                 {file && (
                   <div className="mb-8">
+                    <h2 className="text-xl font-semibold mb-4">Waveform</h2>
                     <div ref={waveformRef} className="w-full h-32 bg-gray-100 rounded-lg mb-2" />
                     <div className="flex justify-between items-center">
                       <div className="text-sm text-gray-600">
@@ -462,7 +484,7 @@ function App() {
                 )}
 
                 {/* Mel Spectrogram Display */}
-                {melSpectrogram && (
+                {/* {melSpectrogram && (
                   <div className="mb-8">
                     <h2 className="text-xl font-semibold mb-4">Mel Spectrogram</h2>
                     <div className="w-full overflow-x-auto">
@@ -472,7 +494,7 @@ function App() {
                       />
                     </div>
                   </div>
-                )}
+                )} */}
 
                 {/* Piano Roll Visualization */}
                 {transcription && (
@@ -487,14 +509,14 @@ function App() {
                 )}
 
                 {/* Transcription Results */}
-                {transcription && (
+                {/* {transcription && (
                   <div className="mt-8">
                     <h2 className="text-xl font-semibold mb-4">Transcription Results</h2>
                     <pre className="bg-gray-50 p-4 rounded-lg overflow-auto">
                       {JSON.stringify(transcription, null, 2)}
                     </pre>
                   </div>
-                )}
+                )} */}
               </div>
             </div>
           </div>
