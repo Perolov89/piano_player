@@ -68,14 +68,20 @@ const PianoRoll = ({ notes, duration, currentTime }: { notes: any[], duration: n
 
     // Draw notes
     notes.forEach(note => {
-      const x = (note.note - 21) * KEY_WIDTH; // A0 at left
+      const keyIdx = note.note - 21;
+      const x = keyIdx * KEY_WIDTH; // A0 at left
       const y = height - note.end_time * PIXELS_PER_SECOND;
       const noteHeight = (note.end_time - note.start_time) * PIXELS_PER_SECOND;
-      // Draw note rectangle
-      ctx.fillStyle = `rgba(0, 100, 255, ${note.velocity / 127})`;
+      // Use yellow for black keys, blue for white keys
+      const isBlack = BLACK_KEYS_88[keyIdx];
+      ctx.fillStyle = isBlack
+        ? 'rgba(255, 220, 0, 0.85)'
+        : `rgba(0, 100, 255, ${note.velocity / 127})`;
       ctx.fillRect(x, y, KEY_WIDTH, noteHeight);
-      ctx.strokeStyle = 'rgba(0, 50, 255, 0.5)';
-      ctx.strokeRect(x, y, KEY_WIDTH, noteHeight);
+      // Add a thin white border for all notes
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, KEY_WIDTH - 1, noteHeight - 1);
     });
 
     // Draw time markers (horizontal lines)
@@ -548,31 +554,35 @@ function App() {
   }, [melSpectrogram])
 
   return (
-    <div className="min-h-screen bg-gray-100 py-6 flex flex-col justify-center sm:py-12">
-      <div className="relative py-3 sm:max-w-xl sm:mx-auto">
-        <div className="relative px-4 py-10 bg-white shadow-lg sm:rounded-3xl sm:p-20">
+    <div className="piano-transcriber">
+      <div className="piano-transcriber-container">
+        <div className="piano-transcriber-card">
           <div className="max-w-md mx-auto">
             <div className="divide-y divide-gray-200">
               <div className="py-8 text-base leading-6 space-y-4 text-gray-700 sm:text-lg sm:leading-7">
-                <h1 className="text-3xl font-bold text-center mb-8">Piano Transcriber</h1>
+                <h1 className="piano-transcriber-title">Piano Transcriber</h1>
                 
                 {/* File Upload */}
-                <div className="mb-8">
-                  <input
-                    type="file"
-                    accept=".wav"
-                    onChange={handleFileChange}
-                    className="block w-full text-sm text-gray-500
-                      file:mr-4 file:py-2 file:px-4
-                      file:rounded-full file:border-0
-                      file:text-sm file:font-semibold
-                      file:bg-blue-50 file:text-blue-700
-                      hover:file:bg-blue-100"
-                  />
+                <div className="piano-transcriber-section">
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+                    <label htmlFor="file-upload" className="piano-transcriber-file-label">
+                      Choose File
+                    </label>
+                    <input
+                      id="file-upload"
+                      type="file"
+                      accept=".wav"
+                      onChange={handleFileChange}
+                      className="piano-transcriber-file-input"
+                    />
+                    {file && (
+                      <div className="piano-transcriber-file-name">{file.name}</div>
+                    )}
+                  </div>
                   <button
                     onClick={handleUpload}
                     disabled={!file || isUploading}
-                    className="mt-4 w-full bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 disabled:opacity-50"
+                    className="piano-transcriber-button mt-4"
                   >
                     {isUploading ? 'Processing...' : 'Upload & Transcribe'}
                   </button>
@@ -580,24 +590,24 @@ function App() {
 
                 {/* Error Display */}
                 {error && (
-                  <div className="mb-8 p-4 bg-red-50 text-red-700 rounded-lg">
+                  <div className="piano-transcriber-error">
                     {error}
                   </div>
                 )}
                 
                 {/* Waveform Display with Playback Controls */}
                 {file && (
-                  <div className="mb-8">
-                    <h2 className="text-xl font-semibold mb-4">Waveform</h2>
-                    <div ref={waveformRef} className="w-full h-32 bg-gray-100 rounded-lg mb-2" />
+                  <div className="piano-transcriber-section">
+                    <h2 className="piano-transcriber-section-title">Waveform</h2>
+                    <div ref={waveformRef} className="piano-transcriber-waveform" />
                     <div className="flex justify-between items-center">
-                      <div className="text-sm text-gray-600">
+                      <div className="text-sm text-gray-600 font-medium">
                         {formatTime(currentTime)} / {formatTime(duration)}
                       </div>
                       <div className="flex space-x-4">
                         <button
                           onClick={togglePlayPause}
-                          className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+                          className="piano-transcriber-button px-6"
                         >
                           {isPlaying ? 'Pause' : 'Play'}
                         </button>
@@ -606,32 +616,21 @@ function App() {
                   </div>
                 )}
 
-                {/* Mel Spectrogram Display */}
-                {/* {melSpectrogram && (
-                  <div className="mb-8">
-                    <h2 className="text-xl font-semibold mb-4">Mel Spectrogram</h2>
-                    <div className="w-full overflow-x-auto">
-                      <canvas
-                        ref={canvasRef}
-                        className="w-full h-[48rem] bg-white rounded-lg"
-                      />
-                    </div>
-                  </div>
-                )} */}
-
                 {/* Piano Roll Visualization */}
                 {transcription && (
                   <>
-                    <div className="mb-8">
-                      <h2 className="text-xl font-semibold mb-4">Piano Roll</h2>
-                      <PianoRoll 
-                        notes={transcription.notes} 
-                        duration={transcription.duration}
-                        currentTime={currentTime}
-                      />
+                    <div className="piano-transcriber-section piano-roll-section">
+                      <h2 className="piano-transcriber-section-title">Piano Roll</h2>
+                      <div className="piano-roll-canvas-wrapper">
+                        <PianoRoll 
+                          notes={transcription.notes} 
+                          duration={transcription.duration}
+                          currentTime={currentTime}
+                        />
+                      </div>
                     </div>
-                    <div className="mb-8">
-                      <h2 className="text-xl font-semibold mb-4">Sheet Music</h2>
+                    <div className="piano-transcriber-section">
+                      <h2 className="piano-transcriber-section-title">Sheet Music</h2>
                       <SheetMusic 
                         notes={transcription.notes} 
                         duration={transcription.duration}
@@ -639,16 +638,6 @@ function App() {
                     </div>
                   </>
                 )}
-
-                {/* Transcription Results */}
-                {/* {transcription && (
-                  <div className="mt-8">
-                    <h2 className="text-xl font-semibold mb-4">Transcription Results</h2>
-                    <pre className="bg-gray-50 p-4 rounded-lg overflow-auto">
-                      {JSON.stringify(transcription, null, 2)}
-                    </pre>
-                  </div>
-                )} */}
               </div>
             </div>
           </div>
