@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import axios from 'axios'
 import WaveSurfer from 'wavesurfer.js'
+import ABCJS from 'abcjs'
 import './App.css'
 
 const API_URL = 'http://localhost:8000'
@@ -10,6 +11,14 @@ function formatTime(seconds: number): string {
   const remainingSeconds = Math.floor(seconds % 60)
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
 }
+
+// Helper function to convert MIDI note number to note name
+const getNoteName = (midiNote: number): string => {
+  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const octave = Math.floor(midiNote / 12) - 1;
+  const noteIndex = midiNote % 12;
+  return `${noteNames[noteIndex]}${octave}`;
+};
 
 // Piano roll visualization
 const PianoRoll = ({ notes, duration, currentTime }: { notes: any[], duration: number, currentTime: number }) => {
@@ -100,14 +109,6 @@ const PianoRoll = ({ notes, duration, currentTime }: { notes: any[], duration: n
     ctx.restore();
   }, [notes, duration, currentTime]);
 
-  // Helper function to convert MIDI note number to note name
-  const getNoteName = (midiNote: number): string => {
-    const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-    const octave = Math.floor(midiNote / 12) - 1;
-    const noteIndex = midiNote % 12;
-    return `${noteNames[noteIndex]}${octave}`;
-  };
-
   return (
     <div className="w-full overflow-x-auto">
       <canvas
@@ -115,6 +116,86 @@ const PianoRoll = ({ notes, duration, currentTime }: { notes: any[], duration: n
         className="w-full bg-white rounded-lg"
         style={{ minWidth: '100%' }}
       />
+    </div>
+  );
+};
+
+// Sheet Music visualization
+const SheetMusic = ({ notes, duration }: { notes: any[], duration: number }) => {
+  const sheetMusicRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!notes.length || !sheetMusicRef.current) return;
+
+    // Convert MIDI notes to ABC notation
+    const convertToABC = (notes: any[]): string => {
+      // ABC header
+      let abc = 'X:1\nT:Piano Transcription\nM:4/4\nL:1/8\nK:C\n';
+      
+      // Group notes by time to create chords
+      const timeMap = new Map<number, any[]>();
+      notes.forEach(note => {
+        const startTime = Math.round(note.start_time * 8) / 8; // Round to nearest 1/8 note
+        if (!timeMap.has(startTime)) {
+          timeMap.set(startTime, []);
+        }
+        timeMap.get(startTime)!.push(note);
+      });
+
+      // Sort times
+      const sortedTimes = Array.from(timeMap.keys()).sort((a, b) => a - b);
+
+      // Convert to ABC notation
+      let currentBar = 0;
+      let currentTime = 0;
+      let abcNotes = '';
+
+      sortedTimes.forEach(time => {
+        // Add bar lines
+        while (currentTime + 0.5 <= time) {
+          abcNotes += '|';
+          currentBar++;
+          currentTime += 0.5;
+        }
+
+        // Get notes at this time
+        const chordNotes = timeMap.get(time)!;
+        
+        // Convert MIDI notes to ABC notation
+        const abcChord = chordNotes.map(note => {
+          const noteName = getNoteName(note.note);
+          const [pitch, octave] = noteName.split('');
+          return pitch.toLowerCase() + (octave === '4' ? '' : octave);
+        }).join('');
+
+        // Add chord or single note
+        abcNotes += chordNotes.length > 1 ? `[${abcChord}]` : abcChord;
+      });
+
+      // Add final bar line
+      abcNotes += '|';
+
+      return abc + abcNotes;
+    };
+
+    // Generate ABC notation
+    const abcNotation = convertToABC(notes);
+
+    // Render sheet music
+    ABCJS.renderAbc(sheetMusicRef.current, abcNotation, {
+      responsive: 'resize',
+      staffwidth: 600,
+      scale: 1.2,
+      paddingtop: 20,
+      paddingbottom: 20,
+      paddingright: 20,
+      paddingleft: 20,
+    });
+  }, [notes, duration]);
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <div ref={sheetMusicRef} className="w-full bg-white rounded-lg" />
     </div>
   );
 };
@@ -498,14 +579,23 @@ function App() {
 
                 {/* Piano Roll Visualization */}
                 {transcription && (
-                  <div className="mb-8">
-                    <h2 className="text-xl font-semibold mb-4">Piano Roll</h2>
-                    <PianoRoll 
-                      notes={transcription.notes} 
-                      duration={transcription.duration}
-                      currentTime={currentTime}
-                    />
-                  </div>
+                  <>
+                    <div className="mb-8">
+                      <h2 className="text-xl font-semibold mb-4">Piano Roll</h2>
+                      <PianoRoll 
+                        notes={transcription.notes} 
+                        duration={transcription.duration}
+                        currentTime={currentTime}
+                      />
+                    </div>
+                    <div className="mb-8">
+                      <h2 className="text-xl font-semibold mb-4">Sheet Music</h2>
+                      <SheetMusic 
+                        notes={transcription.notes} 
+                        duration={transcription.duration}
+                      />
+                    </div>
+                  </>
                 )}
 
                 {/* Transcription Results */}
