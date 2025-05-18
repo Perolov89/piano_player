@@ -36,7 +36,7 @@ const BLACK_KEYS_88 = [
 const PianoRoll = ({ notes, duration, currentTime }: { notes: any[], duration: number, currentTime: number }) => {
   const pianoRollRef = useRef<HTMLCanvasElement>(null);
   const PIXELS_PER_SECOND = 50;
-  const KEY_WIDTH = 10; 
+  const KEY_WIDTH = 10; // Each key is a vertical stripe
   const TOTAL_KEYS = 88;
 
   // Effect for drawing piano roll and tracker
@@ -47,7 +47,7 @@ const PianoRoll = ({ notes, duration, currentTime }: { notes: any[], duration: n
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set canvas size - swap width and height for rotation
+    // Set canvas size: width = 88 keys, height = duration
     const width = TOTAL_KEYS * KEY_WIDTH;
     const height = duration * PIXELS_PER_SECOND;
     canvas.width = width;
@@ -57,68 +57,61 @@ const PianoRoll = ({ notes, duration, currentTime }: { notes: any[], duration: n
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, width, height);
 
-    // Save the context state
-    ctx.save();
-    
-    // Rotate the canvas 90 degrees clockwise
-    ctx.translate(width, 0);
-    ctx.rotate(Math.PI / 2);
-
-    // Draw piano keys background
+    // Draw piano keys background (vertical stripes)
     for (let i = 0; i < TOTAL_KEYS; i++) {
       const x = i * KEY_WIDTH;
       ctx.fillStyle = BLACK_KEYS_88[i] ? '#333' : '#fff';
-      ctx.fillRect(0, x, height, KEY_WIDTH);
+      ctx.fillRect(x, 0, KEY_WIDTH, height);
       ctx.strokeStyle = '#ccc';
-      ctx.strokeRect(0, x, height, KEY_WIDTH);
+      ctx.strokeRect(x, 0, KEY_WIDTH, height);
     }
 
     // Draw notes
     notes.forEach(note => {
-      const y = note.start_time * PIXELS_PER_SECOND;
-      const x = (note.note - 21) * KEY_WIDTH; // A0 is MIDI note 21
+      const x = (note.note - 21) * KEY_WIDTH; // A0 at left
+      const y = height - note.end_time * PIXELS_PER_SECOND;
       const noteHeight = (note.end_time - note.start_time) * PIXELS_PER_SECOND;
-      
       // Draw note rectangle
       ctx.fillStyle = `rgba(0, 100, 255, ${note.velocity / 127})`;
-      ctx.fillRect(y, x, noteHeight, KEY_WIDTH);
+      ctx.fillRect(x, y, KEY_WIDTH, noteHeight);
       ctx.strokeStyle = 'rgba(0, 50, 255, 0.5)';
-      ctx.strokeRect(y, x, noteHeight, KEY_WIDTH);
+      ctx.strokeRect(x, y, KEY_WIDTH, noteHeight);
     });
 
-    // Draw time markers
+    // Draw time markers (horizontal lines)
     ctx.fillStyle = '#666';
-    ctx.font = '8px Arial'; // Reduced font size
+    ctx.font = '8px Arial';
     for (let t = 0; t <= duration; t += 1) {
-      const y = t * PIXELS_PER_SECOND;
+      const y = height - t * PIXELS_PER_SECOND;
       ctx.beginPath();
-      ctx.moveTo(y, 0);
-      ctx.lineTo(y, width);
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
       ctx.strokeStyle = '#ccc';
       ctx.stroke();
-      ctx.fillText(`${t}s`, y + 2, 8); // Adjusted y position for smaller font
+      ctx.fillText(`${t}s`, 2, y - 2);
     }
 
-    // Draw note labels
+    // Draw note labels (at bottom)
     ctx.fillStyle = '#000';
-    ctx.font = '8px Arial'; // Reduced font size
+    ctx.font = '8px Arial';
     for (let i = 0; i < TOTAL_KEYS; i++) {
-      const x = i * KEY_WIDTH;
-      const noteName = getNoteName(i + 21); // Convert MIDI note number to note name
-      ctx.fillText(noteName, 2, x + KEY_WIDTH - 2);
+      const x = i * KEY_WIDTH + 2;
+      const noteName = getNoteName(i + 21);
+      ctx.save();
+      ctx.translate(x + KEY_WIDTH / 2, height - 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText(noteName, 0, 0);
+      ctx.restore();
     }
 
-    // Draw time tracker
-    const trackerY = currentTime * PIXELS_PER_SECOND;
+    // Draw time tracker (horizontal red line)
+    const trackerY = height - currentTime * PIXELS_PER_SECOND;
     ctx.beginPath();
     ctx.strokeStyle = '#FF0000';
     ctx.lineWidth = 2;
-    ctx.moveTo(trackerY, 0);
-    ctx.lineTo(trackerY, width);
+    ctx.moveTo(0, trackerY);
+    ctx.lineTo(width, trackerY);
     ctx.stroke();
-
-    // Restore the context state
-    ctx.restore();
   }, [notes, duration, currentTime]);
 
   return (
