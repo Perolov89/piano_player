@@ -20,6 +20,18 @@ const getNoteName = (midiNote: number): string => {
   return `${noteNames[noteIndex]}${octave}`;
 };
 
+// Precompute the 88-key pattern (true = black, false = white), starting from A0 (MIDI 21)
+const BLACK_KEYS_88 = [
+  false, true, false, false, true, false, true, false, false, true, false, true, // A0 - G#1
+  false, true, false, false, true, false, true, false, false, true, false, true, // A1 - G#2
+  false, true, false, false, true, false, true, false, false, true, false, true, // A2 - G#3
+  false, true, false, false, true, false, true, false, false, true, false, true, // A3 - G#4
+  false, true, false, false, true, false, true, false, false, true, false, true, // A4 - G#5
+  false, true, false, false, true, false, true, false, false, true, false, true, // A5 - G#6
+  false, true, false, false, true, false, true, false, false, true, false, true, // A6 - G#7
+  false, true, false, false, true, false, true, false // A7 - C8 (last 4 keys)
+];
+
 // Piano roll visualization
 const PianoRoll = ({ notes, duration, currentTime }: { notes: any[], duration: number, currentTime: number }) => {
   const pianoRollRef = useRef<HTMLCanvasElement>(null);
@@ -55,7 +67,7 @@ const PianoRoll = ({ notes, duration, currentTime }: { notes: any[], duration: n
     // Draw piano keys background
     for (let i = 0; i < TOTAL_KEYS; i++) {
       const x = i * KEY_WIDTH;
-      ctx.fillStyle = i % 12 === 1 || i % 12 === 3 || i % 12 === 6 || i % 12 === 8 || i % 12 === 10 ? '#333' : '#fff';
+      ctx.fillStyle = BLACK_KEYS_88[i] ? '#333' : '#fff';
       ctx.fillRect(0, x, height, KEY_WIDTH);
       ctx.strokeStyle = '#ccc';
       ctx.strokeRect(0, x, height, KEY_WIDTH);
@@ -130,12 +142,16 @@ const SheetMusic = ({ notes, duration }: { notes: any[], duration: number }) => 
     // Convert MIDI notes to ABC notation
     const convertToABC = (notes: any[]): string => {
       // ABC header
-      let abc = 'X:1\nT:Piano Transcription\nM:4/4\nL:1/8\nK:C\n';
+      let abc = 'X:1\nT:Piano Transcription\nM:4/4\nL:1/16\nK:C\n';
+      
+      // Sort notes by start time
+      const sortedNotes = [...notes].sort((a, b) => a.start_time - b.start_time);
       
       // Group notes by time to create chords
       const timeMap = new Map<number, any[]>();
-      notes.forEach(note => {
-        const startTime = Math.round(note.start_time * 8) / 8; // Round to nearest 1/8 note
+      sortedNotes.forEach(note => {
+        // Round to nearest 1/16 note for more precise timing
+        const startTime = Math.round(note.start_time * 16) / 16;
         if (!timeMap.has(startTime)) {
           timeMap.set(startTime, []);
         }
@@ -151,11 +167,11 @@ const SheetMusic = ({ notes, duration }: { notes: any[], duration: number }) => 
       let abcNotes = '';
 
       sortedTimes.forEach(time => {
-        // Add bar lines
-        while (currentTime + 0.5 <= time) {
+        // Add bar lines (every 4 beats)
+        while (currentTime + 1 <= time) {
           abcNotes += '|';
           currentBar++;
-          currentTime += 0.5;
+          currentTime += 1;
         }
 
         // Get notes at this time
@@ -163,9 +179,39 @@ const SheetMusic = ({ notes, duration }: { notes: any[], duration: number }) => 
         
         // Convert MIDI notes to ABC notation
         const abcChord = chordNotes.map(note => {
-          const noteName = getNoteName(note.note);
-          const [pitch, octave] = noteName.split('');
-          return pitch.toLowerCase() + (octave === '4' ? '' : octave);
+          // MIDI note 60 is middle C (C4)
+          const midiNote = note.note;
+          const noteIndex = ((midiNote - 60) % 12 + 12) % 12;
+          const octave = Math.floor((midiNote - 60) / 12) + 4;
+          
+          // Convert to note name
+          const noteNames = ['c', '^c', 'd', '^d', 'e', 'f', '^f', 'g', '^g', 'a', '^a', 'b'];
+          let abcNote = noteNames[noteIndex];
+          
+          // Add octave markers
+          if (octave < 4) {
+            // Lower octaves use commas
+            abcNote = ','.repeat(4 - octave) + abcNote;
+          } else if (octave > 4) {
+            // Higher octaves use apostrophes
+            abcNote = abcNote + "'".repeat(octave - 4);
+          }
+          
+          // Add duration based on note length
+          const duration = note.end_time - note.start_time;
+          if (duration <= 0.0625) { // 1/16 note
+            abcNote += '/';
+          } else if (duration <= 0.125) { // 1/8 note
+            abcNote += '/2';
+          } else if (duration <= 0.25) { // 1/4 note
+            // Default duration, no suffix needed
+          } else if (duration <= 0.5) { // 1/2 note
+            abcNote += '2';
+          } else { // Whole note
+            abcNote += '1';
+          }
+          
+          return abcNote;
         }).join('');
 
         // Add chord or single note
@@ -180,6 +226,7 @@ const SheetMusic = ({ notes, duration }: { notes: any[], duration: number }) => 
 
     // Generate ABC notation
     const abcNotation = convertToABC(notes);
+    console.log('ABC Notation:', abcNotation); // Debug log
 
     // Render sheet music
     ABCJS.renderAbc(sheetMusicRef.current, abcNotation, {
@@ -190,6 +237,8 @@ const SheetMusic = ({ notes, duration }: { notes: any[], duration: number }) => 
       paddingbottom: 20,
       paddingright: 20,
       paddingleft: 20,
+      add_classes: true,
+      selectionColor: '#00ff00',
     });
   }, [notes, duration]);
 

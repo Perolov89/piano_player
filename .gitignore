@@ -9,7 +9,8 @@ __pycache__/
 # data
 /models
 /uploads
-wav_c_scale
+/audio
+/images_for_cursor
 
 # Distribution / packaging
 .Python
